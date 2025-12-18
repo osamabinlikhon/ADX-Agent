@@ -1,0 +1,135 @@
+version: '3.8'
+
+services:
+  # Main Web Application (Frontend)
+  web-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://backend:8000
+      - GOOGLE_GENERATIVE_AI_API_KEY=${GOOGLE_GENERATIVE_AI_API_KEY:-demo_key}
+      - E2B_API_KEY=${E2B_API_KEY:-demo_key}
+    depends_on:
+      - backend
+      - sandbox
+    restart: unless-stopped
+    networks:
+      - agent-network
+    volumes:
+      - ./logs:/app/logs
+
+  # Backend API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - E2B_API_KEY=${E2B_API_KEY:-demo_key}
+      - GOOGLE_GENERATIVE_AI_API_KEY=${GOOGLE_GENERATIVE_AI_API_KEY:-demo_key}
+      - DATABASE_URL=postgresql://postgres:${DB_PASSWORD:-password}@database:5432/agent_db
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - ./backend:/app
+      - backend-storage:/app/data
+    restart: unless-stopped
+    networks:
+      - agent-network
+    depends_on:
+      - database
+      - redis
+
+  # Desktop Environment Sandbox
+  sandbox:
+    build:
+      context: ./sandbox
+      dockerfile: Dockerfile
+    ports:
+      - "6080:6080"  # noVNC web interface
+      - "5900:5900"  # VNC server
+    environment:
+      - DISPLAY=:0
+      - VNC_PORT=5900
+      - VNC_PASSWORD=${VNC_PASSWORD:-}
+    volumes:
+      - sandbox-storage:/opt/data
+      - ./sandbox:/app
+    restart: unless-stopped
+    networks:
+      - agent-network
+
+  # PostgreSQL Database (Production)
+  database:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=agent_db
+      - POSTGRES_USER=agent_user
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-secure_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+    networks:
+      - agent-network
+
+  # Redis for Session Management
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    restart: unless-stopped
+    networks:
+      - agent-network
+
+  # Monitoring (Optional)
+  monitoring:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    networks:
+      - agent-network
+
+  # Load Balancer (Production)
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - web-app
+    restart: unless-stopped
+    networks:
+      - agent-network
+
+volumes:
+  backend-storage:
+  sandbox-storage:
+  postgres_data:
+  redis_data:
+  grafana_data:
+
+networks:
+  agent-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

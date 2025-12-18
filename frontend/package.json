@@ -1,0 +1,40 @@
+{
+  "name": "adx-agent-coding-assistant",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "14.2.3",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "antd": "^5.16.0",
+    "@ant-design/icons": "^5.3.0",
+    "@ant-design/x": "^2.1.1",
+    "@ant-design/x-markdown": "^2.1.1",
+    "ai": "^3.0.0",
+    "lucide-react": "^0.460.0",
+    "clsx": "^2.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "@types/react": "^18.2.79",
+    "@types/react-dom": "^18.2.25",
+    "typescript": "^5.4.5",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "14.2.3",
+    "tailwindcss": "^3.4.3",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38"
+  },
+  "optionalDependencies": {
+    "@ai-sdk/google": "^1.0.0",
+    "@e2b/desktop": "^0.2.0",
+    "zod": "^3.23.8"
+  }
+}

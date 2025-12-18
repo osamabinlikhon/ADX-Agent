@@ -1,0 +1,77 @@
+# Desktop Environment with VNC for E2B Desktop SDK
+FROM ubuntu:22.04
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV DISPLAY=:0
+ENV VNC_PORT=5900
+ENV VNC_PASSWORD=${VNC_PASSWORD:-}
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    xserver-xorg \
+    x11-xserver-utils \
+    xvfb \
+    x11-utils \
+    xauth \
+    xfce4 \
+    xfce4-goodies \
+    util-linux \
+    sudo \
+    curl \
+    git \
+    wget \
+    python3-pip \
+    xdotool \
+    scrot \
+    ffmpeg \
+    x11vnc \
+    net-tools \
+    netcat \
+    x11-apps \
+    libreoffice \
+    xpdf \
+    gedit \
+    xpaint \
+    tint2 \
+    galculator \
+    pcmanfm \
+    firefox \
+    chromium-browser \
+    code \
+    nano \
+    vim \
+    tmux \
+    htop \
+    tree \
+    unzip \
+    zip \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clone and set up noVNC
+RUN git clone --branch e2b-desktop https://github.com/e2b-dev/noVNC.git /opt/noVNC && \
+    ln -sf /opt/noVNC/vnc.html /opt/noVNC/index.html && \
+    git clone --branch v0.12.0 https://github.com/novnc/websockify /opt/noVNC/utils/websockify
+
+# Set up xfce4 terminal
+RUN ln -sf /usr/bin/xfce4-terminal.wrapper /etc/alternatives/x-terminal-emulator
+
+# Create startup script
+COPY desktop-startup.sh /desktop-startup.sh
+RUN chmod +x /desktop-startup.sh
+
+# Create VNC password if provided
+RUN if [ ! -z "$VNC_PASSWORD" ]; then \
+    echo "$VNC_PASSWORD" | vncpasswd -f > /root/.vnc/passwd && \
+    chmod 600 /root/.vnc/passwd; \
+    fi
+
+# Set up data directory
+RUN mkdir -p /opt/data
+
+# Expose VNC and noVNC ports
+EXPOSE 5900 6080
+
+# Set startup command
+CMD ["/desktop-startup.sh"]

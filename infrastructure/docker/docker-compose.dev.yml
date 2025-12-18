@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  web-app:
+    build: 
+      context: .
+      dockerfile: Dockerfile.web
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - GOOGLE_GENERATIVE_AI_API_KEY=${GOOGLE_GENERATIVE_AI_API_KEY:-demo_key}
+      - E2B_API_KEY=${E2B_API_KEY:-demo_key}
+    depends_on:
+      - desktop-env
+    restart: unless-stopped
+    networks:
+      - agent-network
+
+  desktop-env:
+    build: 
+      context: .
+      dockerfile: Dockerfile.desktop
+    ports:
+      - "5900:5900"  # VNC port
+      - "6080:6080"  # noVNC web interface
+    environment:
+      - DISPLAY=:0
+      - VNC_PORT=5900
+      - VNC_PASSWORD=${VNC_PASSWORD:-}
+    restart: unless-stopped
+    networks:
+      - agent-network
+    volumes:
+      - desktop-storage:/opt/data
+
+  # Optional: Database for production
+  database:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=agent_db
+      - POSTGRES_USER=agent_user
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-secure_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - agent-network
+
+  # Optional: Redis for session management
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - agent-network
+
+volumes:
+  desktop-storage:
+  postgres_data:
+  redis_data:
+
+networks:
+  agent-network:
+    driver: bridge
