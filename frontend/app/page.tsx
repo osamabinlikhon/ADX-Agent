@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ConfigProvider, theme, Card, Typography, Button, Space, Alert } from 'antd';
-import { ThunderboltOutlined, RobotOutlined } from '@ant-design/icons';
+import { ConfigProvider, theme, Card, Typography, Button, Space, Alert, Badge } from 'antd';
+import { ThunderboltOutlined, RobotOutlined, ToolOutlined } from '@ant-design/icons';
 import AgentWorkspace from '@/components/AgentWorkspace';
 import SystemStatus from '@/components/SystemStatus';
 
@@ -43,7 +43,7 @@ export default function HomePage() {
                   Interactive Coding Assistant
                 </Title>
                 <Paragraph className="text-lg text-gray-600">
-                  AI-powered desktop automation with real-time collaboration
+                  AI-powered desktop automation with 200+ tools via MCP integration
                 </Paragraph>
                 
                 {!hasApiKeys && (
@@ -78,10 +78,26 @@ export default function HomePage() {
             <div>
               <Title level={2} className="!mb-0">
                 Interactive Coding Assistant
+                <Badge 
+                  count="MCP" 
+                  style={{ 
+                    backgroundColor: '#1677ff', 
+                    marginLeft: 12,
+                    fontSize: 12,
+                    height: 18,
+                    lineHeight: '16px'
+                  }} 
+                />
               </Title>
               <p className="text-gray-600 mt-1">
-                AI-powered desktop automation {hasApiKeys ? 'with full capabilities' : '(Demo Mode)'}
+                AI-powered desktop automation with 200+ tools via MCP {hasApiKeys ? 'with full capabilities' : '(Demo Mode)'}
               </p>
+              <div className="flex items-center space-x-4 mt-2">
+                <div className="flex items-center space-x-1">
+                  <ToolOutlined style={{ fontSize: 14, color: '#1677ff' }} />
+                  <span className="text-sm text-gray-500">GitHub • Browserbase • Exa • Docker</span>
+                </div>
+              </div>
             </div>
             <Space>
               <SystemStatus />
