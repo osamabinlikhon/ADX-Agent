@@ -1,0 +1,54 @@
+# Browserbase MCP Tool Configuration
+# Repository: https://github.com/browserbase/mcp
+
+browserbase:
+  server:
+    name: "browserbase"
+    description: "Advanced web automation and testing with AI capabilities"
+    version: "1.0.0"
+    source: "github://browserbase/mcp"
+  
+  capabilities:
+    - "Web automation"
+    - "AI-powered testing"
+    - "Screenshot capture"
+    - "PDF generation"
+    - "Form automation"
+    - "Data extraction"
+    - "Multi-browser testing"
+  
+  environment:
+    BROWSERBASE_API_KEY: "${BROWSERBASE_API_KEY}"
+    BROWSERBASE_PROJECT_ID: "${BROWSERBASE_PROJECT_ID}"
+    GOOGLE_GENERATIVE_AI_API_KEY: "${GOOGLE_GENERATIVE_AI_API_KEY}"
+    GEMINI_API_KEY: "${GOOGLE_GENERATIVE_AI_API_KEY}" # Alias
+  
+  browser:
+    headless: true
+    viewport:
+      width: 1920
+      height: 1080
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+  
+  performance:
+    timeout: 60000
+    waitTimeout: 10000
+    retryAttempts: 2
+    maxRetries: 3
+  
+  security:
+    allowDownloads: true
+    allowUploads: false
+    allowPopups: true
+    blockAds: false
+  
+  limits:
+    maxSessions: 10
+    maxConcurrency: 5
+    maxPageLoadTime: 30000
+    maxScreenshotSize: "10MB"
+  
+  errorHandling:
+    maxRetries: 3
+    retryDelay: 2000
+    fallbackBehavior: "retry_with_delay"

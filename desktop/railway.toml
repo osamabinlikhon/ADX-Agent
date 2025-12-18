@@ -1,14 +1,15 @@
 # ADX-Agent Desktop Service Railway Configuration
-# Optimized for E2B Desktop SDK + VNC + Automation
+# Optimized for E2B Desktop SDK + VNC + Automation + MCP Integration
 
 [build]
 builder = "nixpacks"
-buildCommand = "apt-get update && apt-get install -y xvfb x11vnc xterm && npm install"
+buildCommand = "apt-get update && apt-get install -y xvfb x11vnc xterm curl && npm install -g @e2b/mcp-gateway"
 watchPatterns = [
     "app/**",
     "config/**",
     "*.sh",
-    "package.json"
+    "package.json",
+    "*.json"
 ]
 
 [deploy]
@@ -18,25 +19,47 @@ healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
 
-# Pre-deploy command for desktop environment setup
+# Pre-deploy command for desktop environment setup and MCP initialization
 preDeployCommand = [
     "chmod +x /app/startup.sh",
-    "mkdir -p /app/logs /app/screenshots"
+    "mkdir -p /app/logs /app/screenshots /app/mcp-runtime",
+    "cd /app && npm init -y",
+    "npm install @e2b/mcp-gateway @e2b/sandbox @github/mcp @browserbase/mcp @exa-labs/mcp"
 ]
 
-# Environment-specific configurations
+# Environment variables for MCP tools
 [deploy.environments.production]
 variables = [
     "DISPLAY=:99",
     "E2B_API_KEY=${E2B_API_KEY}",
-    "LOG_LEVEL=INFO"
+    "MCP_CONFIG_PATH=/app/config/mcp-config.json",
+    "MCP_TOOLS_PATH=/app/config/tools",
+    "MCP_GATEWAY_PORT=8080",
+    "MCP_GATEWAY_HOST=0.0.0.0",
+    "LOG_LEVEL=INFO",
+    # MCP Tool API Keys (configure these in Railway secrets)
+    "GITHUB_TOKEN=${GITHUB_TOKEN}",
+    "BROWSERBASE_API_KEY=${BROWSERBASE_API_KEY}",
+    "BROWSERBASE_PROJECT_ID=${BROWSERBASE_PROJECT_ID}",
+    "GOOGLE_GENERATIVE_AI_API_KEY=${GOOGLE_GENERATIVE_AI_API_KEY}",
+    "EXA_API_KEY=${EXA_API_KEY}"
 ]
 
 [deploy.environments.staging]
 variables = [
     "DISPLAY=:99",
     "E2B_API_KEY=${E2B_API_KEY}",
-    "LOG_LEVEL=DEBUG"
+    "MCP_CONFIG_PATH=/app/config/mcp-config.json",
+    "MCP_TOOLS_PATH=/app/config/tools",
+    "MCP_GATEWAY_PORT=8080",
+    "MCP_GATEWAY_HOST=0.0.0.0",
+    "LOG_LEVEL=DEBUG",
+    # MCP Tool API Keys for staging
+    "GITHUB_TOKEN=${GITHUB_TOKEN}",
+    "BROWSERBASE_API_KEY=${BROWSERBASE_API_KEY}",
+    "BROWSERBASE_PROJECT_ID=${BROWSERBASE_PROJECT_ID}",
+    "GOOGLE_GENERATIVE_AI_API_KEY=${GOOGLE_GENERATIVE_AI_API_KEY}",
+    "EXA_API_KEY=${EXA_API_KEY}"
 ]
 
 # Volume mounts for persistent data
@@ -49,5 +72,67 @@ mounts = [
     {
         target = "/app/screenshots", 
         source = "screenshots"
+    },
+    {
+        target = "/app/mcp-runtime",
+        source = "mcp-runtime"
+    }
+]
+
+# Resource limits and scaling
+[deploy.scaling]
+vertical = true
+horizontal = {
+    min = 1,
+    max = 3,
+    targetCpu = 70,
+    targetMemory = 80
+}
+
+# Health check configuration
+[deploy.healthcheck]
+path = "/health"
+timeout = 60
+interval = 30
+retries = 3
+success_threshold = 1
+failure_threshold = 3
+
+# Additional health check for MCP gateway
+[deploy.healthcheck.extended]
+path = "/mcp/status"
+timeout = 10
+interval = 60
+enabled = true
+
+# Security configuration
+[deploy.security]
+readOnlyRootFilesystem = false
+allowPrivilegeEscalation = false
+runAsNonRoot = false
+capabilities = ["NET_BIND_SERVICE"]
+
+# Network configuration
+[deploy.network]
+exposed_ports = [
+    {
+        internal = 8080,
+        external = 8080,
+        protocol = "tcp"
+    },
+    {
+        internal = 6080,
+        external = 6080,
+        protocol = "tcp"
+    },
+    {
+        internal = 5900,
+        external = 5900,
+        protocol = "tcp"
+    },
+    {
+        internal = 8081,
+        external = 8081,
+        protocol = "tcp"
     }
 ]

@@ -1,0 +1,97 @@
+{
+  "version": "1.0",
+  "name": "ADX-Agent MCP Configuration",
+  "description": "Model Context Protocol integration for ADX-Agent coding assistant",
+  "tools": {
+    "github": {
+      "enabled": true,
+      "description": "GitHub repository management and operations",
+      "requirements": [
+        "GITHUB_TOKEN"
+      ],
+      "config": {
+        "timeout": 30000,
+        "maxRetries": 3
+      }
+    },
+    "browserbase": {
+      "enabled": true,
+      "description": "Advanced web automation and testing",
+      "requirements": [
+        "BROWSERBASE_API_KEY",
+        "BROWSERBASE_PROJECT_ID",
+        "GOOGLE_GENERATIVE_AI_API_KEY"
+      ],
+      "config": {
+        "timeout": 60000,
+        "maxRetries": 2,
+        "headless": true
+      }
+    },
+    "exa": {
+      "enabled": true,
+      "description": "AI-powered search and research",
+      "requirements": [
+        "EXA_API_KEY"
+      ],
+      "config": {
+        "timeout": 30000,
+        "maxRetries": 3,
+        "maxResults": 50
+      }
+    },
+    "notion": {
+      "enabled": false,
+      "description": "Notion workspace integration",
+      "requirements": [
+        "NOTION_API_KEY"
+      ],
+      "config": {
+        "timeout": 30000,
+        "maxRetries": 3
+      }
+    },
+    "stripe": {
+      "enabled": false,
+      "description": "Payment processing integration",
+      "requirements": [
+        "STRIPE_SECRET_KEY"
+      ],
+      "config": {
+        "timeout": 30000,
+        "maxRetries": 3
+      }
+    },
+    "airtable": {
+      "enabled": false,
+      "description": "Airtable database integration",
+      "requirements": [
+        "AIRTABLE_API_KEY"
+      ],
+      "config": {
+        "timeout": 30000,
+        "maxRetries": 3
+      }
+    }
+  },
+  "gateway": {
+    "port": 8080,
+    "host": "0.0.0.0",
+    "maxConnections": 100,
+    "timeout": 120000,
+    "cors": {
+      "enabled": true,
+      "origins": ["*"],
+      "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    },
+    "auth": {
+      "enabled": true,
+      "tokenExpiry": 3600
+    }
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "json",
+    "output": "stdout"
+  }
+}

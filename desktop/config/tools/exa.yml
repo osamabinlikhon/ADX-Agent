@@ -1,0 +1,57 @@
+# Exa MCP Tool Configuration
+# Repository: https://github.com/exa-labs/mcp
+
+exa:
+  server:
+    name: "exa"
+    description: "AI-powered search and research tool"
+    version: "1.0.0"
+    source: "github://exa-labs/mcp"
+  
+  capabilities:
+    - "Semantic search"
+    - "Web content extraction"
+    - "Research automation"
+    - "Content summarization"
+    - "Link finding"
+    - "Real-time search"
+    - "Domain-specific search"
+  
+  environment:
+    EXA_API_KEY: "${EXA_API_KEY}"
+    EXA_API_URL: "https://api.exa.com"
+  
+  search:
+    timeout: 30000
+    maxResults: 50
+    includeDomains: []
+    excludeDomains: []
+    contentType: "all" # all, html, markdown, text
+  
+  ai:
+    enabled: true
+    model: "exa-llm-model"
+    maxTokens: 4000
+    temperature: 0.7
+  
+  content:
+    includeText: true
+    includeImages: false
+    includeLinks: true
+    maxContentLength: 10000
+    extractMode: "semantic" # semantic, raw, both
+  
+  performance:
+    maxRetries: 3
+    retryDelay: 1000
+    rateLimit: "10requests/second"
+  
+  limits:
+    maxSearchesPerDay: 1000
+    maxContentPerRequest: "5MB"
+    maxConcurrentRequests: 5
+  
+  errorHandling:
+    maxRetries: 3
+    retryDelay: 1000
+    fallbackBehavior: "return_error_response"

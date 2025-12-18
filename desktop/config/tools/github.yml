@@ -1,0 +1,38 @@
+# GitHub MCP Tool Configuration
+# Repository: https://github.com/github/mcp
+
+github:
+  server:
+    name: "github"
+    description: "GitHub repository management and operations"
+    version: "1.0.0"
+    source: "github://github/mcp"
+  
+  capabilities:
+    - "Repository management"
+    - "Issue tracking"
+    - "Pull request operations"
+    - "Branch management"
+    - "File operations"
+    - "Git operations"
+  
+  environment:
+    GITHUB_TOKEN: "${GITHUB_TOKEN}"
+    GITHUB_API_URL: "https://api.github.com"
+  
+  limits:
+    maxRequestsPerMinute: 5000
+    maxFileSize: "100MB"
+    timeout: 30000
+
+  permissions:
+    - "Read repositories"
+    - "Read issues"
+    - "Read pull requests"
+    - "Write issues (if needed)"
+    - "Write pull requests (if needed)"
+  
+  errorHandling:
+    maxRetries: 3
+    retryDelay: 1000
+    fallbackBehavior: "log_and_continue"
