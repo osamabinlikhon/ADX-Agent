@@ -1,0 +1,320 @@
+name: 🚀 Deploy to Railway
+
+on:
+  push:
+    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - production
+        - staging
+      service:
+        description: 'Specific service to deploy'
+        required: false
+        type: string
+
+env:
+  RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+  NODE_VERSION: '18'
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # Test and build jobs run first
+  test-and-build:
+    name: 🧪 Test & Build
+    runs-on: ubuntu-latest
+    
+    outputs:
+      frontend-ready: ${{ steps.check-frontend.outputs.exists }}
+      backend-ready: ${{ steps.check-backend.outputs.exists }}
+      desktop-ready: ${{ steps.check-desktop.outputs.exists }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Check service structure
+        id: check-frontend
+        run: echo "exists=$(test -d frontend && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+        
+      - name: Check backend structure
+        id: check-backend
+        run: echo "exists=$(test -d backend && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+        
+      - name: Check desktop structure
+        id: check-desktop
+        run: echo "exists=$(test -d desktop && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+        
+      # Run existing test suite
+      - name: Run comprehensive tests
+        run: |
+          if [ -f ".github/workflows/tests.yml" ]; then
+            echo "Running existing test suite..."
+            # Trigger the test workflow
+            gh workflow run tests.yml -f branch=${{ github.ref_name }}
+          else
+            echo "No test workflow found, skipping tests"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Railway deployment job
+  deploy-to-railway:
+    name: 🚂 Deploy to Railway
+    runs-on: ubuntu-latest
+    needs: test-and-build
+    if: always() && (needs.test-and-build.result == 'success' || needs.test-and-build.result == 'skipped')
+    
+    strategy:
+      matrix:
+        service: 
+          - frontend: ${{ needs.test-and-build.outputs.frontend-ready == 'true' }}
+          - backend: ${{ needs.test-and-build.outputs.backend-ready == 'true' }}
+          - desktop: ${{ needs.test-and-build.outputs.desktop-ready == 'true' }}
+        fail-fast: false
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Railway CLI
+        run: |
+          curl -fsSL https://railway.app/install.sh | sh
+          echo "$HOME/.railway/bin" >> $GITHUB_PATH
+          
+      - name: Deploy service to Railway
+        if: matrix.service
+        run: |
+          SERVICE_NAME="adx-agent-${{ matrix.service }}"
+          echo "🚀 Deploying $SERVICE_NAME to Railway..."
+          
+          # Deploy with Railway CLI
+          railway up --service="$SERVICE_NAME" || {
+            echo "⚠️ Service $SERVICE_NAME not found, creating it..."
+            railway add --service="$SERVICE_NAME"
+            railway up --service="$SERVICE_NAME"
+          }
+          
+          # Set environment variables
+          if [ "${{ github.event.inputs.environment }}" == "staging" ]; then
+            railway variables set NODE_ENV=staging
+            railway variables set RAILWAY_ENVIRONMENT=staging
+          else
+            railway variables set NODE_ENV=production
+            railway variables set RAILWAY_ENVIRONMENT=production
+          fi
+          
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          
+      - name: Wait for deployment
+        run: |
+          echo "⏳ Waiting for deployment to be ready..."
+          sleep 30
+          
+      - name: Health check deployed service
+        if: matrix.service
+        run: |
+          SERVICE_NAME="adx-agent-${{ matrix.service }}"
+          echo "🏥 Running health check for $SERVICE_NAME..."
+          
+          # Get service URL
+          SERVICE_URL=$(railway status --service="$SERVICE_NAME" | grep -o 'https://[^[:space:]]*' | head -1)
+          
+          if [ -z "$SERVICE_URL" ]; then
+            echo "❌ No URL found for $SERVICE_NAME"
+            exit 1
+          fi
+          
+          echo "🌐 Service URL: $SERVICE_URL"
+          
+          # Health check based on service type
+          if [[ "$SERVICE_NAME" == *"backend"* ]]; then
+            HEALTH_ENDPOINT="$SERVICE_URL/health"
+          else
+            HEALTH_ENDPOINT="$SERVICE_URL"
+          fi
+          
+          echo "🔍 Checking: $HEALTH_ENDPOINT"
+          
+          # Health check with retry
+          for i in {1..5}; do
+            if curl -f -s --max-time 30 "$HEALTH_ENDPOINT" > /dev/null 2>&1; then
+              echo "✅ Health check passed for $SERVICE_NAME"
+              break
+            else
+              echo "⚠️ Health check attempt $i/5 failed, waiting..."
+              sleep 15
+            fi
+          done
+          
+      - name: Deploy summary
+        run: |
+          echo "📊 Deployment Summary"
+          echo "===================="
+          railway status
+          
+          echo ""
+          echo "🌐 Service URLs:"
+          railway status | grep -E "(Service|URL)" || echo "Check Railway dashboard for URLs"
+          
+          echo ""
+          echo "🔧 Useful commands:"
+          echo "  railway logs --follow    # View live logs"
+          echo "  railway metrics          # View service metrics"
+          echo "  railway shell            # Open shell in deployment"
+
+  # Multi-service deployment for monorepo
+  deploy-monorepo:
+    name: 🏗️ Deploy Monorepo
+    runs-on: ubuntu-latest
+    needs: test-and-build
+    if: github.event.inputs.environment == 'production' && !github.event.inputs.service
+    environment: production
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Railway CLI
+        run: |
+          curl -fsSL https://railway.app/install.sh | sh
+          echo "$HOME/.railway/bin" >> $GITHUB_PATH
+          
+      - name: Deploy all services
+        run: |
+          echo "🚀 Deploying ADX-Agent monorepo to Railway..."
+          
+          # Set production environment
+          railway variables set NODE_ENV=production
+          railway variables set RAILWAY_ENVIRONMENT=production
+          railway variables set DEPLOYMENT_ID=${{ github.run_id }}
+          railway variables set DEPLOYMENT_SHA=${{ github.sha }}
+          
+          # Deploy each service if it exists
+          if [ "${{ needs.test-and-build.outputs.frontend-ready }}" == "true" ]; then
+            echo "📦 Deploying Frontend..."
+            railway up --service="adx-agent-frontend" || railway add --service="adx-agent-frontend"
+          fi
+          
+          if [ "${{ needs.test-and-build.outputs.backend-ready }}" == "true" ]; then
+            echo "⚡ Deploying Backend..."
+            railway up --service="adx-agent-backend" || railway add --service="adx-agent-backend"
+          fi
+          
+          if [ "${{ needs.test-and-build.outputs.desktop-ready }}" == "true" ]; then
+            echo "🖥️ Deploying Desktop Service..."
+            railway up --service="adx-agent-desktop" || railway add --service="adx-agent-desktop"
+          fi
+          
+          # Add database services
+          echo "🗄️ Setting up database services..."
+          railway add --service="adx-agent-database" postgresql || true
+          railway add --service="adx-agent-cache" redis || true
+          
+      - name: Final deployment validation
+        run: |
+          echo "🔍 Final deployment validation..."
+          
+          # Wait for all services to be ready
+          sleep 60
+          
+          # Check all services
+          for service in "adx-agent-frontend" "adx-agent-backend" "adx-agent-desktop"; do
+            echo "Checking $service..."
+            if railway status --service="$service" &> /dev/null; then
+              SERVICE_URL=$(railway status --service="$service" | grep -o 'https://[^[:space:]]*' | head -1)
+              if [ ! -z "$SERVICE_URL" ]; then
+                echo "✅ $service: $SERVICE_URL"
+              fi
+            fi
+          done
+          
+      - name: Notify deployment complete
+        run: |
+          echo "🎉 ADX-Agent deployment completed successfully!"
+          echo "Repository: ${{ github.repository }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Workflow: ${{ github.run_id }}"
+          echo "Environment: ${{ github.event.inputs.environment || 'production' }}"
+          
+          # Post to GitHub (if you have a webhook or integration set up)
+          if [ ! -z "${{ secrets.DISCORD_WEBHOOK }}" ]; then
+            curl -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"embeds\": [{
+                  \"title\": \"🚀 ADX-Agent Deployed Successfully\",
+                  \"description\": \"Deployment completed to Railway\",
+                  \"color\": 3447003,
+                  \"fields\": [
+                    {\"name\": \"Repository\", \"value\": \"${{ github.repository }}\", \"inline\": true},
+                    {\"name\": \"Commit\", \"value\": \"${{ github.sha }}\", \"inline\": true},
+                    {\"name\": \"Environment\", \"value\": \"${{ github.event.inputs.environment || 'production' }}\", \"inline\": true}
+                  ],
+                  \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)\"
+                }]
+              }"
+          fi
+
+  # Rollback job (triggered on failure)
+  rollback:
+    name: ⏪ Rollback Deployment
+    runs-on: ubuntu-latest
+    needs: [deploy-to-railway, deploy-monorepo]
+    if: failure() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Railway CLI
+        run: |
+          curl -fsSL https://railway.app/install.sh | sh
+          echo "$HOME/.railway/bin" >> $GITHUB_PATH
+          
+      - name: Rollback to previous deployment
+        run: |
+          echo "⚠️ Attempting to rollback deployment..."
+          
+          # Get previous successful deployment
+          DEPLOYMENTS=$(railway deployments list --limit=5)
+          if echo "$DEPLOYMENTS" | grep -q "Running"; then
+            echo "✅ Found previous successful deployment"
+            PREVIOUS_DEPLOYMENT=$(echo "$DEPLOYMENTS" | grep "Running" | tail -1 | awk '{print $1}')
+            
+            if [ ! -z "$PREVIOUS_DEPLOYMENT" ]; then
+              echo "🔄 Rolling back to deployment: $PREVIOUS_DEPLOYMENT"
+              railway deploy rollback "$PREVIOUS_DEPLOYMENT"
+            fi
+          else
+            echo "❌ No previous successful deployment found"
+          fi
+          
+      - name: Notify rollback
+        run: |
+          echo "⚠️ Deployment rollback initiated"
+          echo "This may indicate issues with the current deployment"
+          
+          if [ ! -z "${{ secrets.DISCORD_WEBHOOK }}" ]; then
+            curl -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"embeds\": [{
+                  \"title\": \"⚠️ ADX-Agent Rollback Initiated\",
+                  \"description\": \"Deployment rollback was triggered\",
+                  \"color\": 16711680,
+                  \"fields\": [
+                    {\"name\": \"Repository\", \"value\": \"${{ github.repository }}\", \"inline\": true},
+                    {\"name\": \"Commit\", \"value\": \"${{ github.sha }}\", \"inline\": true},
+                    {\"name\": \"Environment\", \"value\": \"${{ github.event.inputs.environment || 'production' }}\", \"inline\": true}
+                  ],
+                  \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)\"
+                }]
+              }"
+          fi

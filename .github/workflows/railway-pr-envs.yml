@@ -1,0 +1,261 @@
+name: 🏗️ Manage PR Environments (Railway)
+
+on:
+  pull_request:
+    types: [opened, closed, reopened, synchronize]
+
+env:
+  # These should be set as GitHub repository secrets
+  RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }} # Account-level token (NOT project token)
+  LINK_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }} # Railway project ID
+  DUPLICATE_FROM_ENV: ${{ secrets.RAILWAY_BASE_ENVIRONMENT || 'production' }} # Environment to duplicate from
+  DATABASE_SERVICE_ID: ${{ secrets.RAILWAY_DATABASE_SERVICE_ID }} # Service ID for database injection
+  
+  # Database configuration for PR environments
+  DATABASE_URL_ENV_NAME: "DATABASE_URL"
+  REDIS_URL_ENV_NAME: "REDIS_URL"
+  
+  # Optional: Team ID if using team projects
+  # TEAM_ID: ${{ secrets.RAILWAY_TEAM_ID }}
+
+jobs:
+  pr_opened:
+    name: 🆕 Create PR Environment
+    runs-on: ubuntu-latest
+    if: github.event.action == 'opened' || github.event.action == 'reopened'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Railway CLI
+        run: |
+          curl -fsSL https://railway.app/install.sh | sh
+          echo "$HOME/.railway/bin" >> $GITHUB_PATH
+          
+      - name: Link to Railway project
+        run: |
+          echo "🔗 Linking to Railway project..."
+          railway link --project "${{ env.LINK_PROJECT_ID }}" --environment "${{ env.DUPLICATE_FROM_ENV }}"
+          # Add --team flag if using team projects:
+          # railway link --project "${{ env.LINK_PROJECT_ID }}" --environment "${{ env.DUPLICATE_FROM_ENV }}" --team "${{ env.TEAM_ID }}"
+          
+      - name: Create Railway Environment for PR
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_BRANCH="${{ github.event.pull_request.head.ref }}"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          
+          echo "🏗️ Creating PR environment: pr-$PR_NUMBER"
+          echo "Branch: $PR_BRANCH"
+          echo "Title: $PR_TITLE"
+          
+          # Generate unique database credentials for this PR
+          DB_NAME="adx_agent_pr_${PR_NUMBER}"
+          DB_USER="pr_user_${PR_NUMBER}"
+          DB_PASS="pr_pass_$(openssl rand -hex 16)"
+          
+          # Create environment and duplicate from base environment
+          railway environment new "pr-$PR_NUMBER" --copy "${{ env.DUPLICATE_FROM_ENV }}" \
+            --service-variable "${{ env.DATABASE_SERVICE_ID }}" \
+            "${{ env.DATABASE_URL_ENV_NAME }}=postgresql://${DB_USER}:${DB_PASS}@database.railway.internal:5432/${DB_NAME}" \
+            "${{ env.REDIS_URL_ENV_NAME }}=redis://user:pass@cache.railway.internal:6379/pr_${PR_NUMBER}"
+          
+      - name: Set PR-specific environment variables
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          
+          echo "🔧 Setting PR-specific environment variables..."
+          
+          # Set environment context
+          railway variables set RAILWAY_ENVIRONMENT="pr-$PR_NUMBER"
+          railway variables set NODE_ENV="staging"
+          railway variables set PR_NUMBER="$PR_NUMBER"
+          railway variables set PR_BRANCH="${{ github.event.pull_request.head.ref }}"
+          railway variables set PR_SHA="${{ github.sha }}"
+          railway variables set PR_TITLE="${{ github.event.pull_request.title }}"
+          
+          # Set API URLs to use PR environment
+          railway variables set NEXT_PUBLIC_API_URL="https://api-adx-agent-pr-$PR_NUMBER.railway.app"
+          
+          # Set database to use PR-specific database
+          echo "🗄️ Database for PR $PR_NUMBER has been configured"
+          
+      - name: Deploy services to PR environment
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_ENV="pr-$PR_NUMBER"
+          
+          echo "🚀 Deploying services to PR environment..."
+          
+          # Deploy frontend if it exists
+          if [ -d "frontend" ] && [ -f "frontend/railway.toml" ]; then
+            echo "📦 Deploying frontend to PR environment..."
+            railway up --service="adx-agent-frontend" --environment="$PR_ENV" || \
+            railway add --service="adx-agent-frontend"
+          fi
+          
+          # Deploy backend if it exists
+          if [ -d "backend" ] && [ -f "backend/railway.toml" ]; then
+            echo "⚡ Deploying backend to PR environment..."
+            railway up --service="adx-agent-backend" --environment="$PR_ENV" || \
+            railway add --service="adx-agent-backend"
+          fi
+          
+          # Deploy desktop service if it exists
+          if [ -d "desktop" ] && [ -f "desktop/railway.toml" ]; then
+            echo "🖥️ Deploying desktop service to PR environment..."
+            railway up --service="adx-agent-desktop" --environment="$PR_ENV" || \
+            railway add --service="adx-agent-desktop"
+          fi
+          
+      - name: Wait for deployment and validate
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_ENV="pr-$PR_NUMBER"
+          
+          echo "⏳ Waiting for PR environment deployment..."
+          sleep 60
+          
+          # Check service status
+          echo "🔍 Checking service status..."
+          railway status --environment="$PR_ENV"
+          
+      - name: Update PR with deployment info
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_ENV="pr-$PR_NUMBER"
+          
+          # Get service URLs
+          FRONTEND_URL=$(railway status --service="adx-agent-frontend" --environment="$PR_ENV" 2>/dev/null | grep -o 'https://[^[:space:]]*' | head -1 || echo "")
+          BACKEND_URL=$(railway status --service="adx-agent-backend" --environment="$PR_ENV" 2>/dev/null | grep -o 'https://[^[:space:]]*' | head -1 || echo "")
+          
+          echo "📊 PR Environment Summary:"
+          echo "========================="
+          echo "PR Number: $PR_NUMBER"
+          echo "Environment: $PR_ENV"
+          echo "Frontend URL: ${FRONTEND_URL:-Not deployed}"
+          echo "Backend URL: ${BACKEND_URL:-Not deployed}"
+          echo ""
+          echo "🔗 Railway Dashboard: https://railway.app/project/${{ env.LINK_PROJECT_ID }}"
+          
+          # Create deployment comment
+          COMMENT="## 🚀 PR Environment Created
+            
+**Environment:** \`pr-$PR_NUMBER\`
+**Branch:** \`${{ github.event.pull_request.head.ref }}\`
+**Commit:** \`${{ github.sha }}\`
+
+### 🌐 Service URLs:
+- **Frontend:** ${FRONTEND_URL:-Not deployed}
+- **Backend:** ${BACKEND_URL:-Not deployed}
+
+### 🔗 Useful Links:
+- [Railway Dashboard](https://railway.app/project/${{ env.LINK_PROJECT_ID }})
+- [Environment Variables](https://railway.app/project/${{ env.LINK_PROJECT_ID }}/settings/variables)
+
+This environment will be automatically cleaned up when the PR is closed.
+          "
+          
+          # Post comment to PR (requires appropriate GitHub token permissions)
+          if [ ! -z "${{ secrets.GITHUB_TOKEN }}" ]; then
+            gh api repos/${{ github.repository }}/issues/$PR_NUMBER/comments \
+              --field body="$COMMENT" \
+              --jq '.html_url' || echo "Could not post comment to PR"
+          fi
+
+  pr_closed:
+    name: 🗑️ Cleanup PR Environment
+    runs-on: ubuntu-latest
+    if: github.event.action == 'closed'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Railway CLI
+        run: |
+          curl -fsSL https://railway.app/install.sh | sh
+          echo "$HOME/.railway/bin" >> $GITHUB_PATH
+          
+      - name: Link to Railway project
+        run: |
+          echo "🔗 Linking to Railway project..."
+          railway link --project "${{ env.LINK_PROJECT_ID }}" --environment "${{ env.DUPLICATE_FROM_ENV }}"
+          
+      - name: Delete Railway Environment for PR
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_ENV="pr-$PR_NUMBER"
+          
+          echo "🗑️ Cleaning up PR environment: $PR_ENV"
+          
+          # Delete the environment (|| true to ignore if it doesn't exist)
+          railway environment delete "$PR_ENV" || echo "Environment $PR_ENV not found, skipping deletion"
+          
+          echo "✅ PR environment cleanup completed"
+          
+      - name: Remove PR comment
+        if: github.event.pull_request.merged == false
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          
+          # Find and remove deployment comment
+          COMMENT_ID=$(gh api repos/${{ github.repository }}/issues/$PR_NUMBER/comments \
+            --jq '.[] | select(.body | contains("PR Environment Created")) | .id' \
+            --arg pr "$PR_NUMBER" | head -1)
+          
+          if [ ! -z "$COMMENT_ID" ]; then
+            echo "🗑️ Removing deployment comment..."
+            gh api repos/${{ github.repository }}/issues/comments/$COMMENT_ID --method DELETE || echo "Could not remove comment"
+          fi
+
+  pr_synchronized:
+    name: 🔄 Update PR Environment
+    runs-on: ubuntu-latest
+    if: github.event.action == 'synchronize'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Railway CLI
+        run: |
+          curl -fsSL https://railway.app/install.sh | sh
+          echo "$HOME/.railway/bin" >> $GITHUB_PATH
+          
+      - name: Link to Railway project
+        run: |
+          railway link --project "${{ env.LINK_PROJECT_ID }}" --environment "${{ env.DUPLICATE_FROM_ENV }}"
+          
+      - name: Redeploy services for updated code
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_ENV="pr-$PR_NUMBER"
+          
+          echo "🔄 Updating PR environment with latest code..."
+          echo "PR: $PR_NUMBER, Environment: $PR_ENV"
+          
+          # Update deployment SHA
+          railway variables set PR_SHA="${{ github.sha }}"
+          railway variables set UPDATED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+          
+          # Redeploy services
+          for service in "adx-agent-frontend" "adx-agent-backend" "adx-agent-desktop"; do
+            if railway status --service="$service" --environment="$PR_ENV" &> /dev/null; then
+              echo "🔄 Redeploying $service..."
+              railway up --service="$service" --environment="$PR_ENV"
+            fi
+          done
+          
+      - name: Wait and validate updated deployment
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_ENV="pr-$PR_NUMBER"
+          
+          echo "⏳ Waiting for updated deployment..."
+          sleep 30
+          
+          # Quick health check
+          echo "🏥 Running quick health check..."
+          railway status --environment="$PR_ENV"

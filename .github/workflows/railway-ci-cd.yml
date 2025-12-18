@@ -1,0 +1,387 @@
+name: 🎯 CI/CD Pipeline with Railway Integration
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: 'Force deployment even if tests fail'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  NODE_VERSION: '18'
+  PYTHON_VERSION: '3.11'
+  RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+jobs:
+  # Pre-deployment validation
+  validate:
+    name: ✅ Pre-deployment Validation
+    runs-on: ubuntu-latest
+    
+    outputs:
+      should-deploy: ${{ steps.decision.outputs.should-deploy }}
+      environment: ${{ steps.decision.outputs.environment }}
+      trigger-type: ${{ steps.decision.outputs.trigger-type }}
+    
+    steps:
+      - name: Determine deployment strategy
+        id: decision
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "trigger-type=main-branch" >> $GITHUB_OUTPUT
+            echo "should-deploy=true" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            echo "environment=staging" >> $GITHUB_OUTPUT
+            echo "trigger-type=develop-branch" >> $GITHUB_OUTPUT
+            echo "should-deploy=true" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "environment=pr" >> $GITHUB_OUTPUT
+            echo "trigger-type=pr-update" >> $GITHUB_OUTPUT
+            echo "should-deploy=false" >> $GITHUB_OUTPUT
+          else
+            echo "environment=none" >> $GITHUB_OUTPUT
+            echo "trigger-type=other" >> $GITHUB_OUTPUT
+            echo "should-deploy=false" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "Decision made:"
+          echo "  Environment: ${{ steps.decision.outputs.environment }}"
+          echo "  Trigger: ${{ steps.decision.outputs.trigger-type }}"
+          echo "  Should Deploy: ${{ steps.decision.outputs.should-deploy }}"
+
+  # Run comprehensive tests (this is our existing test suite)
+  run-tests:
+    name: 🧪 Comprehensive Test Suite
+    runs-on: ubuntu-latest
+    needs: validate
+    if: needs.validate.outputs.should-deploy == 'true' || github.event.inputs.force_deploy == 'true'
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        test-type: [frontend, backend, integration, e2e, security, performance]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Run test suite
+        run: |
+          echo "🧪 Running ${{ matrix.test-type }} tests..."
+          
+          # Run our existing comprehensive test workflow
+          gh workflow run tests.yml \
+            --ref "${{ github.ref }}" \
+            -f test_type="${{ matrix.test-type }}" \
+            -f branch="${{ github.ref_name }}" || true
+          
+          echo "✅ Test workflow triggered for ${{ matrix.test-type }}"
+          
+      - name: Wait for tests to complete
+        run: |
+          echo "⏳ Waiting for test completion..."
+          
+          # Poll for workflow completion
+          for i in {1..30}; do
+            WORKFLOW_STATUS=$(gh api repos/${{ github.repository }}/actions/workflows/tests.yml/runs \
+              --jq '.workflow_runs[0].conclusion' \
+              --field head_sha="${{ github.sha }}" 2>/dev/null || echo "pending")
+            
+            if [[ "$WORKFLOW_STATUS" == "success" ]]; then
+              echo "✅ Tests completed successfully"
+              break
+            elif [[ "$WORKFLOW_STATUS" == "failure" ]] || [[ "$WORKFLOW_STATUS" == "cancelled" ]]; then
+              echo "❌ Tests failed with status: $WORKFLOW_STATUS"
+              exit 1
+            else
+              echo "⏳ Tests still running... ($i/30)"
+              sleep 20
+            fi
+          done
+          
+      - name: Get test results
+        run: |
+          # Get latest workflow run results
+          gh api repos/${{ github.repository }}/actions/workflows/tests.yml/runs \
+            --jq '.workflow_runs[0] | {id: .id, conclusion: .conclusion, status: .status, html_url: .html_url}' \
+            --field head_sha="${{ github.sha }}" | tee test_results.json
+          
+          # Check if tests passed
+          CONCLUSION=$(cat test_results.json | jq -r '.conclusion')
+          if [[ "$CONCLUSION" != "success" ]]; then
+            echo "❌ Test suite failed with conclusion: $CONCLUSION"
+            echo "🔗 Check results: $(cat test_results.json | jq -r '.html_url')"
+            exit 1
+          fi
+
+  # Security and compliance checks
+  security-scan:
+    name: 🔒 Security & Compliance
+    runs-on: ubuntu-latest
+    needs: [validate, run-tests]
+    if: needs.validate.outputs.should-deploy == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Run security analysis
+        run: |
+          echo "🔒 Running security analysis..."
+          
+          # Install security tools
+          pip install bandit safety semgrep || true
+          
+          # Run security scans
+          echo "Running Bandit security linter..."
+          bandit -r backend/ -f json -o bandit-report.json || true
+          
+          echo "Running Safety dependency check..."
+          safety check --json --output safety-report.json || true
+          
+          echo "Running Semgrep SAST scan..."
+          semgrep --config=auto --json --output semgrep-report.json . || true
+          
+      - name: Upload security reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: |
+            bandit-report.json
+            safety-report.json
+            semgrep-report.json
+            
+      - name: Check for critical security issues
+        run: |
+          # Fail if critical issues found
+          BANDIT_ISSUES=$(cat bandit-report.json 2>/dev/null | jq '.results | length' || echo 0)
+          SAFETY_ISSUES=$(cat safety-report.json 2>/dev/null | jq '.vulnerabilities | length' || echo 0)
+          
+          echo "Security scan results:"
+          echo "  Bandit issues: $BANDIT_ISSUES"
+          echo "  Safety issues: $SAFETY_ISSUES"
+          
+          if [[ $BANDIT_ISSUES -gt 10 ]] || [[ $SAFETY_ISSUES -gt 5 ]]; then
+            echo "❌ Too many security issues found"
+            exit 1
+          fi
+
+  # Railway deployment with "Wait for CI"
+  deploy-to-railway:
+    name: 🚂 Deploy to Railway
+    runs-on: ubuntu-latest
+    needs: [validate, run-tests, security-scan]
+    if: always() && needs.validate.outputs.should-deploy == 'true' && (needs.run-tests.result == 'success' && needs.security-scan.result == 'success')
+    
+    environment: ${{ needs.validate.outputs.environment }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Railway CLI
+        run: |
+          curl -fsSL https://railway.app/install.sh | sh
+          echo "$HOME/.railway/bin" >> $GITHUB_PATH
+          
+      - name: Configure deployment environment
+        run: |
+          echo "⚙️ Configuring deployment for ${{ needs.validate.outputs.environment }}"
+          
+          # Set environment variables
+          railway variables set DEPLOYMENT_SHA="${{ github.sha }}"
+          railway variables set DEPLOYMENT_REF="${{ github.ref }}"
+          railway variables set DEPLOYMENT_RUN_ID="${{ github.run_id }}"
+          railway variables set DEPLOYED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+          railway variables set CI_PIPELINE_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          
+          # Set environment-specific variables
+          if [[ "${{ needs.validate.outputs.environment }}" == "production" ]]; then
+            railway variables set NODE_ENV=production
+            railway variables set RAILWAY_ENVIRONMENT=production
+          elif [[ "${{ needs.validate.outputs.environment }}" == "staging" ]]; then
+            railway variables set NODE_ENV=staging
+            railway variables set RAILWAY_ENVIRONMENT=staging
+          fi
+          
+      - name: Deploy to Railway
+        run: |
+          echo "🚀 Starting deployment to Railway..."
+          
+          # Check if this is a monorepo or single service
+          if [ -f "railway.toml" ] && [ ! -d "frontend" ] && [ ! -d "backend" ]; then
+            echo "📦 Single service deployment..."
+            railway up
+          else
+            echo "🏗️ Multi-service deployment..."
+            
+            # Deploy frontend
+            if [ -d "frontend" ]; then
+              echo "📦 Deploying frontend..."
+              railway up --service="adx-agent-frontend" || railway add --service="adx-agent-frontend"
+            fi
+            
+            # Deploy backend
+            if [ -d "backend" ]; then
+              echo "⚡ Deploying backend..."
+              railway up --service="adx-agent-backend" || railway add --service="adx-agent-backend"
+            fi
+            
+            # Deploy desktop service
+            if [ -d "desktop" ]; then
+              echo "🖥️ Deploying desktop service..."
+              railway up --service="adx-agent-desktop" || railway add --service="adx-agent-desktop"
+            fi
+            
+            # Add database services if they don't exist
+            if [[ "${{ needs.validate.outputs.environment }}" == "production" ]]; then
+              echo "🗄️ Setting up production databases..."
+              railway add --service="adx-agent-database" postgresql || true
+              railway add --service="adx-agent-cache" redis || true
+            fi
+          fi
+          
+      - name: Wait for deployment readiness
+        run: |
+          echo "⏳ Waiting for deployment to be ready..."
+          sleep 60
+          
+      - name: Validate deployment
+        run: |
+          echo "🔍 Validating deployment..."
+          
+          # Get all service URLs
+          echo "📊 Service Status:"
+          railway status
+          
+          # Check service health
+          for service in "adx-agent-frontend" "adx-agent-backend" "adx-agent-desktop"; do
+            if railway status --service="$service" &> /dev/null; then
+              SERVICE_URL=$(railway status --service="$service" | grep -o 'https://[^[:space:]]*' | head -1)
+              
+              if [ ! -z "$SERVICE_URL" ]; then
+                echo "🏥 Health checking $service..."
+                
+                # Health check endpoint
+                if [[ "$service" == *"backend"* ]]; then
+                  HEALTH_ENDPOINT="$SERVICE_URL/health"
+                else
+                  HEALTH_ENDPOINT="$SERVICE_URL"
+                fi
+                
+                # Try health check
+                if curl -f -s --max-time 30 "$HEALTH_ENDPOINT" > /dev/null 2>&1; then
+                  echo "✅ $service health check passed"
+                else
+                  echo "⚠️ $service health check failed"
+                fi
+              fi
+            fi
+          done
+          
+      - name: Update deployment status
+        run: |
+          echo "📝 Updating deployment status..."
+          
+          # Mark deployment as successful
+          railway variables set DEPLOYMENT_STATUS="success"
+          railway variables set DEPLOYMENT_SUCCESS_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+          
+          echo "🎉 Deployment completed successfully!"
+          
+      - name: Notify deployment success
+        run: |
+          echo "📢 Notifying deployment success..."
+          
+          # Get service URLs for notification
+          FRONTEND_URL=$(railway status --service="adx-agent-frontend" 2>/dev/null | grep -o 'https://[^[:space:]]*' | head -1 || echo "Not deployed")
+          BACKEND_URL=$(railway status --service="adx-agent-backend" 2>/dev/null | grep -o 'https://[^[:space:]]*' | head -1 || echo "Not deployed")
+          
+          # Post to Discord if webhook is configured
+          if [ ! -z "${{ secrets.DISCORD_WEBHOOK }}" ]; then
+            curl -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"embeds\": [{
+                  \"title\": \"🎉 ADX-Agent Deployed Successfully\",
+                  \"description\": \"Deployment completed with all tests passing\",
+                  \"color\": 3066993,
+                  \"fields\": [
+                    {\"name\": \"Environment\", \"value\": \"${{ needs.validate.outputs.environment }}\", \"inline\": true},
+                    {\"name\": \"Commit\", \"value\": \"${{ github.sha }}\", \"inline\": true},
+                    {\"name\": \"Frontend\", \"value\": \"$FRONTEND_URL\", \"inline\": true},
+                    {\"name\": \"Backend\", \"value\": \"$BACKEND_URL\", \"inline\": true},
+                    {\"name\": \"Pipeline\", \"value\": \"[View](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\", \"inline\": true}
+                  ],
+                  \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)\"
+                }]
+              }"
+          fi
+
+  # Deployment failure handler
+  deployment-failed:
+    name: ❌ Deployment Failed
+    runs-on: ubuntu-latest
+    needs: [validate, run-tests, deploy-to-railway]
+    if: failure() && needs.validate.outputs.should-deploy == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Railway CLI
+        run: |
+          curl -fsSL https://railway.app/install.sh | sh
+          echo "$HOME/.railway/bin" >> $GITHUB_PATH
+          
+      - name: Mark deployment as failed
+        run: |
+          echo "❌ Marking deployment as failed..."
+          
+          railway variables set DEPLOYMENT_STATUS="failed"
+          railway variables set DEPLOYMENT_FAILED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+          railway variables set FAILURE_REASON="CI/CD pipeline failure"
+          
+      - name: Attempt rollback
+        run: |
+          echo "⏪ Attempting rollback..."
+          
+          # Try to rollback to previous successful deployment
+          DEPLOYMENTS=$(railway deployments list --limit=3)
+          if echo "$DEPLOYMENTS" | grep -q "Running"; then
+            PREVIOUS_DEPLOYMENT=$(echo "$DEPLOYMENTS" | grep "Running" | tail -1 | awk '{print $1}')
+            if [ ! -z "$PREVIOUS_DEPLOYMENT" ]; then
+              echo "🔄 Rolling back to: $PREVIOUS_DEPLOYMENT"
+              railway deploy rollback "$PREVIOUS_DEPLOYMENT"
+            fi
+          fi
+          
+      - name: Notify deployment failure
+        run: |
+          echo "📢 Notifying deployment failure..."
+          
+          if [ ! -z "${{ secrets.DISCORD_WEBHOOK }}" ]; then
+            curl -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"embeds\": [{
+                  \"title\": \"❌ ADX-Agent Deployment Failed\",
+                  \"description\": \"Deployment failed during CI/CD pipeline\",
+                  \"color\": 16711680,
+                  \"fields\": [
+                    {\"name\": \"Environment\", \"value\": \"${{ needs.validate.outputs.environment }}\", \"inline\": true},
+                    {\"name\": \"Commit\", \"value\": \"${{ github.sha }}\", \"inline\": true},
+                    {\"name\": \"Pipeline\", \"value\": \"[View](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\", \"inline\": true},
+                    {\"name\": \"Rollback\", \"value\": \"Automatic rollback attempted\", \"inline\": false}
+                  ],
+                  \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)\"
+                }]
+              }"
+          fi

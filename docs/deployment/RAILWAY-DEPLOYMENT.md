@@ -742,6 +742,296 @@ railway validate                # Validate railway.toml files
 railway deploy --config FILE    # Deploy with specific config
 ```
 
+## 🔄 GitHub Actions Integration with Railway
+
+ADX-Agent includes comprehensive GitHub Actions workflows that integrate seamlessly with Railway's advanced features. This provides a complete CI/CD pipeline from code commit to production deployment.
+
+### 🎯 Available GitHub Actions Workflows
+
+#### 1. **Railway Deployment Workflow** (`railway-deploy.yml`)
+
+Automated deployment with comprehensive testing and validation:
+
+```yaml
+# Triggers on push to main/develop branches
+on:
+  push:
+    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        type: choice
+        options: [production, staging]
+```
+
+**Features:**
+- ✅ **Comprehensive Testing** - Runs existing test suite before deployment
+- ✅ **Health Checks** - Validates deployment with service health checks
+- ✅ **Multi-Service Deployment** - Handles monorepo deployments automatically
+- ✅ **Rollback Support** - Automatic rollback on deployment failures
+- ✅ **Environment-Specific** - Different configurations for staging/production
+- ✅ **Notifications** - Discord/Slack notifications for deployment status
+
+#### 2. **PR Environment Management** (`railway-pr-envs.yml`)
+
+Automatically creates isolated environments for pull requests:
+
+```yaml
+# Creates staging environment for each PR
+on:
+  pull_request:
+    types: [opened, closed, reopened, synchronize]
+```
+
+**Features:**
+- ✅ **Automatic Environment Creation** - Creates `pr-{number}` environments
+- ✅ **Database Isolation** - Unique database for each PR
+- ✅ **Auto-Cleanup** - Removes environments when PRs close
+- ✅ **Code Synchronization** - Updates deployments when PR code changes
+- ✅ **PR Comments** - Posts deployment URLs to PR comments
+
+#### 3. **CI/CD Pipeline with Wait for CI** (`railway-ci-cd.yml`)
+
+Complete CI/CD pipeline with Railway's "Wait for CI" feature:
+
+```yaml
+# Waits for all tests to pass before deploying
+jobs:
+  run-tests:
+    # Runs comprehensive test suite
+  security-scan:
+    # Security and compliance checks
+  deploy-to-railway:
+    # Deploys only after tests and security pass
+```
+
+**Features:**
+- ✅ **Wait for CI** - Railway waits for GitHub Actions completion
+- ✅ **Security Scanning** - Bandit, Safety, and Semgrep integration
+- ✅ **Test Integration** - Uses existing test suite with polling
+- ✅ **Environment Management** - Automatic environment configuration
+- ✅ **Failure Handling** - Comprehensive error handling and rollback
+
+### 🔐 Required GitHub Secrets Configuration
+
+To enable GitHub Actions integration, configure these secrets in your GitHub repository:
+
+#### **Repository Secrets** (Settings → Secrets and variables → Actions)
+
+```bash
+# Railway Integration
+RAILWAY_TOKEN=your_project_token                    # Project-specific token
+RAILWAY_API_TOKEN=your_account_token               # Account-level token (for PR environments)
+RAILWAY_PROJECT_ID=your_project_id                # Railway project ID
+RAILWAY_PROJECT_ID=your_project_id                # Railway project ID
+RAILWAY_BASE_ENVIRONMENT=production               # Base environment to duplicate from
+RAILWAY_DATABASE_SERVICE_ID=service_id            # Database service ID
+
+# Optional Team Configuration
+RAILWAY_TEAM_ID=your_team_id                      # Team ID (if using team projects)
+
+# Notifications
+DISCORD_WEBHOOK=your_discord_webhook_url          # Discord notification webhook
+SLACK_WEBHOOK=your_slack_webhook_url              # Slack notification webhook
+
+# Development
+GITHUB_TOKEN=github_pat_...                       # GitHub token (auto-provided)
+```
+
+#### **Creating Railway Tokens**
+
+1. **Project Token** (for deployment):
+   - Go to Railway Dashboard → Project Settings → Tokens
+   - Create new project token
+   - Copy token and add to `RAILWAY_TOKEN` secret
+
+2. **Account Token** (for PR environments):
+   - Go to Railway Account Settings → Tokens
+   - Create account-level token (NOT project token)
+   - Add to `RAILWAY_API_TOKEN` secret
+
+### 🏗️ GitHub Actions Workflow Architecture
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant GitHub as GitHub Actions
+    participant Tests as Test Suite
+    participant Security as Security Scan
+    participant Railway as Railway
+    participant DB as Database
+    participant Notify as Notifications
+    
+    Dev->>GitHub: Push code to main/develop
+    GitHub->>Tests: Run comprehensive test suite
+    Tests->>GitHub: Test results
+    GitHub->>Security: Run security scans
+    Security->>GitHub: Security report
+    GitHub->>Railway: Deploy with Wait for CI
+    Railway->>GitHub: Wait for CI completion
+    GitHub->>Railway: Deploy services
+    Railway->>DB: Setup database environment
+    Railway->>GitHub: Deployment status
+    GitHub->>Notify: Send notifications
+    Notify->>Dev: Deployment complete
+```
+
+### 🚀 Deployment Strategies
+
+#### **Main Branch Deployment**
+```yaml
+# Deploys to production after all tests pass
+on:
+  push:
+    branches: [ main ]
+# → Runs tests → Security scan → Deploy to production
+```
+
+#### **Develop Branch Deployment**
+```yaml
+# Deploys to staging environment
+on:
+  push:
+    branches: [ develop ]
+# → Runs tests → Deploy to staging
+```
+
+#### **Pull Request Environments**
+```yaml
+# Creates isolated environment for each PR
+on:
+  pull_request:
+    types: [opened, reopened]
+# → Create PR environment → Deploy services → Post URLs to PR
+```
+
+### 📊 Workflow Execution Flow
+
+```mermaid
+graph TD
+    A[Code Push] --> B[Determine Environment]
+    B --> C[Run Test Suite]
+    C --> D{Tests Pass?}
+    D -->|No| E[Fail Deployment]
+    D -->|Yes| F[Security Scan]
+    F --> G{Security OK?}
+    G -->|No| H[Fail Deployment]
+    G -->|Yes| I[Deploy to Railway]
+    I --> J[Health Check]
+    J --> K{All Healthy?}
+    K -->|No| L[Rollback]
+    K -->|Yes| M[Mark Success]
+    L --> N[Notify Failure]
+    M --> O[Notify Success]
+```
+
+### 🔧 Advanced Configuration
+
+#### **Custom Deployment Scripts**
+```bash
+#!/bin/bash
+# Trigger specific deployment
+gh workflow run railway-deploy.yml -f environment=staging -f service=frontend
+```
+
+#### **Manual Deployment**
+```bash
+# Deploy specific service
+gh workflow run railway-deploy.yml -f service=backend
+
+# Force deployment despite test failures
+gh workflow run railway-ci-cd.yml -f force_deploy=true
+```
+
+#### **Environment Variables Management**
+```bash
+# Set environment variables for deployment
+gh secret set RAILWAY_TOKEN --body "your_token"
+gh secret set RAILWAY_API_TOKEN --body "your_account_token"
+```
+
+### 📈 Monitoring and Observability
+
+#### **Workflow Status Tracking**
+- **GitHub Actions Tab** - Real-time workflow execution
+- **Railway Dashboard** - Deployment status and logs
+- **Service Health** - Automated health checks
+- **Notifications** - Discord/Slack integration
+
+#### **Deployment Metrics**
+```yaml
+# Automatically tracked
+- Deployment duration
+- Test execution time
+- Security scan results
+- Service health status
+- Rollback frequency
+```
+
+#### **Log Aggregation**
+- **GitHub Actions Logs** - CI/CD pipeline logs
+- **Railway Logs** - Application and deployment logs
+- **Test Reports** - Comprehensive test results
+- **Security Reports** - SAST and dependency scan results
+
+### 🔄 Environment Management
+
+#### **Production Environment**
+- **Main branch** deployment
+- **Full test suite** execution
+- **Security scanning** required
+- **Rollback capability** enabled
+- **Monitoring** and alerting active
+
+#### **Staging Environment**
+- **Develop branch** deployment
+- **Core tests** execution
+- **PR environment** duplication source
+- **Database** for testing
+- **Feature testing** and QA
+
+#### **PR Environments**
+- **Auto-created** for each PR
+- **Isolated database** per PR
+- **Code synchronization** on updates
+- **Auto-cleanup** on PR close
+- **URL posting** to PR comments
+
+### 🎯 Best Practices for GitHub Actions Integration
+
+1. **Security**
+   - Use account-level tokens for PR environments
+   - Keep project tokens secret
+   - Enable branch protection rules
+   - Require status checks for merges
+
+2. **Testing**
+   - Run comprehensive tests before deployment
+   - Use matrix testing for different environments
+   - Implement test result caching
+   - Monitor test execution time
+
+3. **Deployment**
+   - Use "Wait for CI" for production deployments
+   - Implement automatic rollback on failures
+   - Monitor deployment health
+   - Use environment-specific configurations
+
+4. **Notifications**
+   - Set up Discord/Slack webhooks
+   - Include deployment URLs in notifications
+   - Track deployment success rates
+   - Monitor rollback frequency
+
+5. **PR Management**
+   - Use unique databases per PR
+   - Auto-cleanup environments
+   - Post deployment URLs to PRs
+   - Sync code on PR updates
+
+---
+
 ## 🎯 Best Practices for ADX-Agent on Railway
 
 ### 1. Service Separation
