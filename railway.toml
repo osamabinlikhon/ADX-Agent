@@ -1,0 +1,53 @@
+# ADX-Agent Project Railway Configuration
+# Main project configuration for multi-service deployment
+
+[build]
+builder = "nixpacks"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# Regional deployment configuration
+[deploy.regions]
+preferred = "us-west-2"
+fallback = "us-east-1"
+
+# Auto-scaling configuration
+[deploy.scaling]
+vertical = true
+horizontal = {
+    min = 1,
+    max = 5,
+    targetCpu = 70,
+    targetMemory = 80
+}
+
+# Environment variables shared across all services
+[deploy.environments.production]
+variables = [
+    "NODE_ENV=production",
+    "RAILWAY_ENVIRONMENT=production",
+    "JWT_SECRET=${JWT_SECRET}",
+    "ENCRYPTION_KEY=${ENCRYPTION_KEY}"
+]
+
+[deploy.environments.staging]
+variables = [
+    "NODE_ENV=staging", 
+    "RAILWAY_ENVIRONMENT=staging",
+    "JWT_SECRET=${STAGING_JWT_SECRET}",
+    "ENCRYPTION_KEY=${STAGING_ENCRYPTION_KEY}"
+]
+
+# Security configuration
+[deploy.security]
+sslMode = "strict"
+wafEnabled = true
+ddosProtection = true
+
+# Monitoring configuration
+[deploy.monitoring]
+metricsEnabled = true
+logRetention = "30d"
+alertsEnabled = true

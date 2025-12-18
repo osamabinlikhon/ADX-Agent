@@ -1,0 +1,44 @@
+# ADX-Agent Backend Railway Configuration
+# Optimized for FastAPI + PostgreSQL + Redis
+
+[build]
+builder = "nixpacks"
+buildCommand = "pip install -r requirements.txt"
+watchPatterns = [
+    "app/**",
+    "*.py",
+    "requirements.txt"
+]
+
+[deploy]
+startCommand = "uvicorn main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
+healthcheckTimeout = 60
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+preDeployCommand = ["python -m alembic upgrade head"]
+
+# Cache mount for pip dependencies
+[build.cache]
+mounts = [
+    {
+        type = "cache",
+        id = "s/backend-pip-cache",
+        target = "/root/.cache/pip"
+    }
+]
+
+# Environment-specific configurations
+[deploy.environments.production]
+variables = [
+    "DATABASE_URL=${DATABASE_URL}",
+    "REDIS_URL=${REDIS_URL}",
+    "PYTHONPATH=/app"
+]
+
+[deploy.environments.staging]
+variables = [
+    "DATABASE_URL=${STAGING_DATABASE_URL}",
+    "REDIS_URL=${STAGING_REDIS_URL}",
+    "PYTHONPATH=/app"
+]

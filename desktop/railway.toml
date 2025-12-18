@@ -1,0 +1,53 @@
+# ADX-Agent Desktop Service Railway Configuration
+# Optimized for E2B Desktop SDK + VNC + Automation
+
+[build]
+builder = "nixpacks"
+buildCommand = "apt-get update && apt-get install -y xvfb x11vnc xterm && npm install"
+watchPatterns = [
+    "app/**",
+    "config/**",
+    "*.sh",
+    "package.json"
+]
+
+[deploy]
+startCommand = "./startup.sh"
+healthcheckPath = "/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+# Pre-deploy command for desktop environment setup
+preDeployCommand = [
+    "chmod +x /app/startup.sh",
+    "mkdir -p /app/logs /app/screenshots"
+]
+
+# Environment-specific configurations
+[deploy.environments.production]
+variables = [
+    "DISPLAY=:99",
+    "E2B_API_KEY=${E2B_API_KEY}",
+    "LOG_LEVEL=INFO"
+]
+
+[deploy.environments.staging]
+variables = [
+    "DISPLAY=:99",
+    "E2B_API_KEY=${E2B_API_KEY}",
+    "LOG_LEVEL=DEBUG"
+]
+
+# Volume mounts for persistent data
+[deploy.volumes]
+mounts = [
+    {
+        target = "/app/logs",
+        source = "logs"
+    },
+    {
+        target = "/app/screenshots", 
+        source = "screenshots"
+    }
+]

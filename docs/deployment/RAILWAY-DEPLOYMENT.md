@@ -4,9 +4,44 @@
 
 Based on the Railway documentation, here's how to deploy the ADX-Agent project using Railway's advanced features.
 
-## 📋 Project Configuration
+## ⚡ Config-as-Code (NEW FEATURE)
 
-### 1. Project Structure for Railway
+ADX-Agent now supports Railway's Config-as-Code feature for declarative deployment configuration. This allows you to manage your entire deployment setup through version-controlled configuration files.
+
+### 📁 Configuration Files Structure
+
+```mermaid
+graph TD
+    A[ADX-Agent Project] --> B[railway.toml]
+    A --> C[Frontend Config]
+    A --> D[Backend Config]
+    A --> E[Desktop Config]
+    
+    C --> F[frontend/railway.toml]
+    D --> G[backend/railway.toml]
+    E --> H[desktop/railway.toml]
+    
+    subgraph "Config Benefits"
+        I[Version Control]
+        J[Team Collaboration]
+        K[Environment Consistency]
+        L[Automated Deployment]
+    end
+```
+
+### 🎯 Key Features
+
+✅ **Declarative Configuration** - All deployment settings in version control  
+✅ **Multi-Service Support** - Separate configs for each service  
+✅ **Environment Variables** - Secure secret management  
+✅ **Health Checks** - Automated service validation  
+✅ **Scaling Configuration** - Auto-scaling and replica settings  
+✅ **Pre-deploy Commands** - Database migrations and setup tasks  
+✅ **Cache Optimization** - Build performance improvements  
+
+### 📋 Project Configuration
+
+#### 1. Project Structure for Railway
 
 ```mermaid
 graph TD
@@ -26,34 +61,180 @@ graph TD
         L[Environment Management]
         M[Observability]
         N[CLI Deployment]
+        O[Config-as-Code]
+        P[Cache Mounts]
+        Q[Pre-deploy Commands]
     end
 ```
 
-### 2. Railway Configuration Files
+#### 2. Railway Configuration Files
 
-#### `railway.json` (Project Configuration)
-```json
-{
-  "build": {
-    "builder": "NIXPACKS"
-  },
-  "deploy": {
-    "startCommand": "npm start",
-    "healthcheckPath": "/health",
-    "healthcheckTimeout": 100,
-    "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 10
-  }
+The ADX-Agent project includes optimized `railway.toml` files for each service:
+
+**Root Configuration** (`railway.toml`)
+```toml
+[build]
+builder = "nixpacks"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# Regional deployment configuration
+[deploy.regions]
+preferred = "us-west-2"
+fallback = "us-east-1"
+
+# Auto-scaling configuration
+[deploy.scaling]
+vertical = true
+horizontal = {
+    min = 1,
+    max = 5,
+    targetCpu = 70,
+    targetMemory = 80
 }
+
+# Security configuration
+[deploy.security]
+sslMode = "strict"
+wafEnabled = true
+ddosProtection = true
+
+# Monitoring configuration
+[deploy.monitoring]
+metricsEnabled = true
+logRetention = "30d"
+alertsEnabled = true
 ```
 
-#### `Procfile` (Process Management)
+**Frontend Configuration** (`frontend/railway.toml`)
+```toml
+[build]
+builder = "nixpacks"
+buildCommand = "npm ci && npm run build"
+watchPatterns = [
+    "src/**",
+    "public/**",
+    "app/**",
+    "components/**",
+    "lib/**"
+]
+
+[deploy]
+startCommand = "npm start"
+healthcheckPath = "/"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+# Environment-specific configurations
+[deploy.environments.production]
+variables = [
+    "NODE_ENV=production",
+    "NEXT_PUBLIC_API_URL=https://api.adx-agent.railway.app"
+]
+
+[deploy.environments.staging]
+variables = [
+    "NODE_ENV=staging",
+    "NEXT_PUBLIC_API_URL=https://staging-api.adx-agent.railway.app"
+]
 ```
-web: cd frontend && npm start
-api: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
-desktop: cd desktop && ./startup.sh
-worker: cd backend && python -m celery worker --loglevel=info
+
+**Backend Configuration** (`backend/railway.toml`)
+```toml
+[build]
+builder = "nixpacks"
+buildCommand = "pip install -r requirements.txt"
+watchPatterns = [
+    "app/**",
+    "*.py",
+    "requirements.txt"
+]
+
+[deploy]
+startCommand = "uvicorn main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
+healthcheckTimeout = 60
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+preDeployCommand = ["python -m alembic upgrade head"]
+
+# Cache mount for pip dependencies
+[build.cache]
+mounts = [
+    {
+        type = "cache",
+        id = "s/backend-pip-cache",
+        target = "/root/.cache/pip"
+    }
+]
+
+# Environment-specific configurations
+[deploy.environments.production]
+variables = [
+    "DATABASE_URL=${DATABASE_URL}",
+    "REDIS_URL=${REDIS_URL}",
+    "PYTHONPATH=/app"
+]
 ```
+
+**Desktop Configuration** (`desktop/railway.toml`)
+```toml
+[build]
+builder = "nixpacks"
+buildCommand = "apt-get update && apt-get install -y xvfb x11vnc xterm && npm install"
+watchPatterns = [
+    "app/**",
+    "config/**",
+    "*.sh",
+    "package.json"
+]
+
+[deploy]
+startCommand = "./startup.sh"
+healthcheckPath = "/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+# Pre-deploy command for desktop environment setup
+preDeployCommand = [
+    "chmod +x /app/startup.sh",
+    "mkdir -p /app/logs /app/screenshots"
+]
+
+# Volume mounts for persistent data
+[deploy.volumes]
+mounts = [
+    {
+        target = "/app/logs",
+        source = "logs"
+    },
+    {
+        target = "/app/screenshots", 
+        source = "screenshots"
+    }
+]
+```
+
+#### 3. Enhanced Deployment Script
+
+The ADX-Agent project includes an enhanced deployment script (`scripts/railway-deploy-enhanced.sh`) with advanced features:
+
+```bash
+#!/bin/bash
+# Enhanced deployment with Config-as-Code support
+./scripts/railway-deploy-enhanced.sh
+```
+
+**New Features:**
+- 🔍 **Config-as-Code Detection** - Automatically detects and validates railway.toml files
+- 🔐 **Auto-Secret Generation** - Generates secure secrets if not provided
+- 🏥 **Enhanced Health Checks** - Comprehensive service validation
+- 🌐 **Custom Domain Support** - Automated subdomain configuration
+- 📊 **Detailed Deployment Summary** - Complete deployment status reporting
 
 ## 🏗️ Service Architecture on Railway
 
@@ -100,6 +281,7 @@ deploy:
   healthcheckTimeout: 60
   restartPolicyType: "ON_FAILURE"
   restartPolicyMaxRetries: 5
+  preDeployCommand: ["python -m alembic upgrade head"]
 environments:
   - name: production
     branch: main
@@ -275,7 +457,7 @@ async def health_check():
 
 ## 🔄 CI/CD Integration with Railway
 
-### GitHub Actions for Railway
+### GitHub Actions for Railway with Wait for CI
 
 ```yaml
 # .github/workflows/railway-deploy.yml
@@ -349,7 +531,7 @@ echo "⚡ API: $(railway status --service adx-agent-backend | grep URL)"
 
 ### Auto-scaling Configuration
 
-```yaml
+```toml
 # railway.toml
 [build]
 builder = "NIXPACKS"
@@ -362,11 +544,14 @@ restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
 
 # Auto-scaling settings
-[deploy.replicas]
-min = 1
-max = 10
-targetCpu = 70
-targetMemory = 80
+[deploy.scaling]
+vertical = true
+horizontal = {
+    min = 1,
+    max = 10,
+    targetCpu = 70,
+    targetMemory = 80
+}
 ```
 
 ### Performance Monitoring
@@ -551,6 +736,10 @@ railway share                   # Share project temporarily
 # Monitoring
 railway metrics                 # View metrics
 railway logs --follow           # Follow logs in real-time
+
+# Config-as-Code
+railway validate                # Validate railway.toml files
+railway deploy --config FILE    # Deploy with specific config
 ```
 
 ## 🎯 Best Practices for ADX-Agent on Railway
@@ -580,6 +769,12 @@ railway logs --follow           # Follow logs in real-time
 - Use Railway's auto-scaling features
 - Implement caching strategies
 
+### 6. Config-as-Code
+- Version control all railway.toml files
+- Use different configurations for different environments
+- Validate configurations before deployment
+- Document all configuration options
+
 ---
 
 ## 🎊 Conclusion
@@ -587,6 +782,7 @@ railway logs --follow           # Follow logs in real-time
 Railway provides an excellent platform for deploying the ADX-Agent project with its advanced features:
 
 ✅ **Zero-config deployment** with Nixpacks  
+✅ **Config-as-Code** with railway.toml files  
 ✅ **Private networking** for secure service communication  
 ✅ **Custom domains** with SSL support  
 ✅ **Environment management** for different stages  
@@ -594,11 +790,14 @@ Railway provides an excellent platform for deploying the ADX-Agent project with 
 ✅ **CLI automation** for CI/CD integration  
 ✅ **Auto-scaling** based on resource usage  
 ✅ **Database integration** with PostgreSQL and Redis  
+✅ **Pre-deploy commands** for migrations and setup  
+✅ **Cache mounts** for build performance  
+✅ **Wait for CI** integration with GitHub Actions  
 
 The combination of Railway's features with ADX-Agent's architecture creates a robust, scalable, and maintainable deployment solution.
 
 ---
 
-**Deployment Guide Version**: 1.0.0  
+**Deployment Guide Version**: 2.0.0  
 **Last Updated**: 2025-12-19  
 **Author**: MiniMax Agent
